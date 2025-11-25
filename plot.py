@@ -9,7 +9,7 @@ def load_history(path):
         history = json.load(f)
     return history
 
-def plot_histories(histories, labels=None, title="Training Curves"):
+def plot_histories(histories, labels=None, title="Training Curves", test_set=False):
     if labels is None:
         labels = [f"Run {i+1}" for i in range(len(histories))]
 
@@ -19,7 +19,8 @@ def plot_histories(histories, labels=None, title="Training Curves"):
 
     plt.subplot(1, 2, 1)
     for hist, label in zip(histories, labels):
-        plt.plot(epochs, hist["train_loss"], linestyle="--", alpha=0.6)
+        if test_set:
+            plt.plot(epochs, hist["train_loss"], linestyle="--", alpha=0.6)
         plt.plot(epochs, hist["val_loss"], label=f"{label}", alpha=0.9)
 
     plt.xlabel("Epoch")
@@ -29,7 +30,8 @@ def plot_histories(histories, labels=None, title="Training Curves"):
 
     plt.subplot(1, 2, 2)
     for hist, label in zip(histories, labels):
-        plt.plot(epochs, hist["train_acc"], linestyle="--", alpha=0.6)
+        if test_set:
+            plt.plot(epochs, hist["train_acc"], linestyle="--", alpha=0.6)
         plt.plot(epochs, hist["val_acc"], label=f"{label}", alpha=0.9)
 
     plt.xlabel("Epoch")
@@ -87,6 +89,7 @@ if __name__ == "__main__":
     parser.add_argument("--compare-latest", action="store_true", help="Compare the newest run of every model type")
     parser.add_argument("--latest", nargs="?", const=True, help="Show newest run for a model name, or list all model names if empty")
     parser.add_argument("--compare-all", type=str, help="Compare ALL runs for a given model name (e.g., BaselineCNN_ModelA)")
+    parser.add_argument("--test-set", action="store_true", help="Include test history when comparing all runs for a given model name.")
     args = parser.parse_args()
 
     if args.list:
@@ -194,5 +197,5 @@ if __name__ == "__main__":
         histories = [load_history(m.replace("_history.json", "")) for m in matching]
         labels = [f"Run {i+1}" for i in range(len(histories))]
 
-        plot_histories(histories, labels, title=f"All runs for {model_prefix}")
+        plot_histories(histories, labels, title=f"All runs for {model_prefix}", test_set=args.test_set)
         exit(0)
