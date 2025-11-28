@@ -9,7 +9,7 @@ def load_history(path):
         history = json.load(f)
     return history
 
-def plot_histories(histories, labels=None, title="Training Curves", test_set=False):
+def plot_histories(histories, labels=None, title="Training Curves", test_set=False, filename=""):
     if labels is None:
         labels = [f"Run {i+1}" for i in range(len(histories))]
 
@@ -27,6 +27,7 @@ def plot_histories(histories, labels=None, title="Training Curves", test_set=Fal
     plt.ylabel("Loss")
     plt.title("Loss Curve")
     plt.legend()
+    plt.grid(True)
 
     plt.subplot(1, 2, 2)
     for hist, label in zip(histories, labels):
@@ -41,10 +42,14 @@ def plot_histories(histories, labels=None, title="Training Curves", test_set=Fal
 
     plt.suptitle(title)
     plt.tight_layout()
-    plt.show()
+    plt.grid(True)
+    if filename != "":
+        plt.savefig(f"{filename}.pdf")
+    else:
+        plt.show()
 
-def plot_single_history(history, title="Training Curve"):
-    plot_histories([history], labels=["Run"], title=title)
+def plot_single_history(history, title="Training Curve", filename=""):
+    plot_histories([history], labels=["Run"], title=title, filename=filename)
 
 def list_history_files():
     checkpoint_dir = "checkpoints"
@@ -62,7 +67,7 @@ def extract_timestamp(filename):
     parts = filename.split("_")
     return parts[1]
 
-def plot_multiple_histories(histories, labels):
+def plot_multiple_histories(histories, labels, filename=""):
     if labels is None:
             labels = [f"Model {i+1}" for i in range(len(histories))]
 
@@ -77,7 +82,11 @@ def plot_multiple_histories(histories, labels):
     plt.ylabel("Validation Accuracy")
     plt.title("Model Comparison (Validation Accuracy)")
     plt.legend()
-    plt.show()
+    plt.grid(True)
+    if filename != "":
+       plt.savefig(f"{filename}.pdf")
+    else:
+        plt.show()
 
 
 if __name__ == "__main__":
@@ -90,6 +99,7 @@ if __name__ == "__main__":
     parser.add_argument("--latest", nargs="?", const=True, help="Show newest run for a model name, or list all model names if empty")
     parser.add_argument("--compare-all", type=str, help="Compare ALL runs for a given model name (e.g., BaselineCNN_ModelA)")
     parser.add_argument("--test-set", action="store_true", help="Include test history when comparing all runs for a given model name.")
+    parser.add_argument("--save", type=str, help="Save plot to a PDF.")
     args = parser.parse_args()
 
     if args.list:
@@ -165,12 +175,12 @@ if __name__ == "__main__":
         print("  -", path)
 
         history = load_history(path)
-        plot_single_history(history, title=model_name)
+        plot_single_history(history, title=model_name, filename=args.save if args.save else "")
         exit(0)
 
     if args.single:
         history = load_history(args.single)
-        plot_single_history(history, title=args.labels[0] if args.labels else "Model")
+        plot_single_history(history, title=args.labels[0] if args.labels else "Model", filename=args.save if args.save else "")
 
     elif args.multiple:
         histories = [load_history(p) for p in args.multiple]
@@ -197,5 +207,5 @@ if __name__ == "__main__":
         histories = [load_history(m.replace("_history.json", "")) for m in matching]
         labels = [f"Run {i+1}" for i in range(len(histories))]
 
-        plot_histories(histories, labels, title=f"All runs for {model_prefix}", test_set=args.test_set)
+        plot_histories(histories, labels, title=f"All runs for {model_prefix}", test_set=args.test_set, filename=args.save if args.save else "")
         exit(0)

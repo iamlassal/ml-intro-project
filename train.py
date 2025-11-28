@@ -81,7 +81,7 @@ experiments = [
         "augment": True,
         "model_class": ResNet18TransferCNN,
         "save_state": True,
-        "load_state": True,
+        "load_state": False,
         "transfer": True
     },
     {
