@@ -13,7 +13,7 @@ from utils import (
 )
 from sklearn.metrics import accuracy_score
 from sklearn.metrics import confusion_matrix as sklearn_confusion_matrix
-from datasets import get_cifar100
+from datasets import get_cifar100, get_cifar100_transfer
 from models.baseline import BaselineCNN
 from models.batchdrop import BatchDropCNN
 from models.batchnorm import BatchnormCNN
@@ -88,25 +88,36 @@ def evaluate_model(model, dataloader, loss_fn, device="cpu"):
 
     eps = 1e-9
     f1_scores = []
+    precision_scores = []
+    recall_scores = []
     for i in range(100):
         tp = test_conf[i, i].item()
         fn = test_conf[i, :].sum().item() - tp
         fp = test_conf[:, i].sum().item() - tp
 
         precision = tp / (tp + fp + eps)
+
         recall = tp / (tp + fn + eps)
         f1 = 2 * precision * recall / (precision + recall + eps)
+
+        recall_scores.append(recall)
+        precision_scores.append(precision)
         f1_scores.append(f1)
 
+    macro_precision = float(np.mean(precision_scores))
+    macro_recall = float(np.mean(recall_scores))
     macro_f1 = float(np.mean(f1_scores))
+
 
     return {
         "test_loss": float(total_loss / total_samples),
         "test_acc": float(total_correct / total_samples),
         "test_top5_acc": float(total_top5 / total_samples),
-        "test_conf_matrix": test_conf.tolist(),
         "per_class_accuracy": per_class_acc,
-        "macro_f1": macro_f1
+        "macro_f1": macro_f1,
+        "macro_precision": macro_precision,
+        "macro_recall": macro_recall,
+        "test_conf_matrix": test_conf.tolist(),
     }
 
 def evaluate_classical(model, dataloader):
@@ -139,6 +150,8 @@ def evaluate_classical(model, dataloader):
     per_class_acc = (conf_np.diagonal() / np.maximum(conf_np.sum(axis=1), 1)).tolist()
 
     eps = 1e-9
+    precision_scores = []
+    recall_scores = []
     f1_scores = []
     for i in range(100):
         tp = conf_np[i, i]
@@ -146,18 +159,26 @@ def evaluate_classical(model, dataloader):
         fp = conf_np[:, i].sum() - tp
 
         precision = tp / (tp + fp + eps)
+
         recall    = tp / (tp + fn + eps)
         f1        = 2 * precision * recall / (precision + recall + eps)
+
+        precision_scores.append(precision)
+        recall_scores.append(recall)
         f1_scores.append(f1)
 
+    macro_precision = float(np.mean(precision_scores))
+    macro_recall = float(np.mean(recall_scores))
     macro_f1 = float(np.mean(f1_scores))
 
     return {
         "test_acc": float(acc),
         "test_top5_acc": float(top5_acc),
-        "test_conf_matrix": conf,
         "per_class_accuracy": per_class_acc,
-        "macro_f1": macro_f1
+        "macro_f1": macro_f1,
+        "macro_precision": macro_precision,
+        "macro_recall": macro_recall,
+        "test_conf_matrix": conf,
     }
 
 def save_and_print_results(results, model_name, i, seed):
@@ -214,14 +235,20 @@ if __name__ == "__main__":
             print(f"[INFO] Saved evaluation results to {save_path}")
 
             print("\n==== Evaluation Summary ====")
-            print(f"Top-1 Accuracy:     {results['test_acc']:.4f}")
-            print(f"Top-5 Accuracy:     {results['test_top5_acc']:.4f}")
-            print(f"Macro F1 Score:     {results['macro_f1']:.4f}")
+            print(f"Top-1 Accuracy:         {results['test_acc']:.4f}")
+            print(f"Top-5 Accuracy:         {results['test_top5_acc']:.4f}")
+            print(f"Macro Precision Score:  {results['macro_precision']:.4f}")
+            print(f"Macro Recall Score:     {results['macro_recall']:.4f}")
+            print(f"Macro F1 Score:         {results['macro_f1']:.4f}")
 
     else:
         for i, (model_path, history_path) in enumerate(get_all_checkpoints(args.model)):
             seed = get_history_seed(history_path)
-            _, _, test_loader = get_cifar100(seed=seed, augment=False)
+
+            if args.model == "ModelT":
+                _, _, test_loader = get_cifar100_transfer(seed=seed, augment=False)
+            else:
+                _, _, test_loader = get_cifar100(seed=seed, augment=False)
 
             model = load_model(model_class, model_path, device=device)
             print(f"[INFO] Loaded CNN checkpoint: {model_path}")
@@ -233,7 +260,9 @@ if __name__ == "__main__":
             print(f"[INFO] Saved evaluation results to {save_path}")
 
             print("\n==== Evaluation Summary ====")
-            print(f"Top-1 Accuracy:  {results['test_acc']:.4f}")
-            print(f"Top-5 Accuracy:  {results['test_top5_acc']:.4f}")
-            print(f"Macro F1 Score:  {results['macro_f1']:.4f}")
-            print(f"Test Loss:       {results['test_loss']:.4f}")
+            print(f"Top-1 Accuracy:         {results['test_acc']:.4f}")
+            print(f"Top-5 Accuracy:         {results['test_top5_acc']:.4f}")
+            print(f"Macro Precision Score:  {results['macro_precision']:.4f}")
+            print(f"Macro Recall Score:     {results['macro_recall']:.4f}")
+            print(f"Macro F1 Score:         {results['macro_f1']:.4f}")
+            print(f"Test Loss:              {results['test_loss']:.4f}")
