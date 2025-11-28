@@ -3,14 +3,16 @@ import json
 import torch
 import torch.nn as nn
 import numpy as np
-import os
-from datetime import datetime
 
 from utils import (
-    load_best_model,
-    confusion_matrix,
+    load_model,
+    confusion_matrix as util_confusion_matrix,
+    get_all_checkpoints,
+    get_classic_checkpoints,
+    get_history_seed,
 )
 from sklearn.metrics import accuracy_score
+from sklearn.metrics import confusion_matrix as sklearn_confusion_matrix
 from datasets import get_cifar100
 from models.baseline import BaselineCNN
 from models.batchdrop import BatchDropCNN
@@ -20,7 +22,6 @@ from models.dropout import DropoutCNN
 from models.widebatchdrop import WideBatchDropCNN
 from models.resnet_transfer import ResNet18TransferCNN
 from models.svm_baseline import PCASVMClassifier
-
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -41,28 +42,6 @@ def require_confirmation(model_name, confirm_flag):
     if confirm_name != model_name:
         print("Model name does not match. Aborting.")
         exit(1)
-
-    log_path = "evaluation_log.json"
-    if os.path.exists(log_path):
-        with open(log_path, "r") as f:
-            log = json.load(f)
-        last_run = log.get("last_test_run", None)
-        last_model = log.get("last_model_tested", None)
-
-        print("\nWARNING: Test set was previously evaluated.")
-        print(f"Last run: {last_run}")
-        print(f"Model: {last_model}")
-
-        answer2 = input("Re-run test evaluation anyway? [yes/no]: ").strip().lower()
-        if answer2 != "yes":
-            print("Aborting.")
-            exit(1)
-
-    with open(log_path, "w") as f:
-        json.dump({
-            "last_test_run": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "last_model_tested": model_name
-        }, f, indent=4)
 
     print("\nTest evaluation confirmed.\n")
 
@@ -103,7 +82,7 @@ def evaluate_model(model, dataloader, loss_fn, device="cpu"):
     all_preds = np.concatenate(all_preds)
     all_labels = np.concatenate(all_labels)
 
-    test_conf = confusion_matrix(model, dataloader, num_classes=100, device=device)
+    test_conf = util_confusion_matrix(model, dataloader, num_classes=100, device=device)
 
     per_class_acc = (test_conf.diag() / test_conf.sum(dim=1)).tolist()
 
@@ -129,6 +108,63 @@ def evaluate_model(model, dataloader, loss_fn, device="cpu"):
         "per_class_accuracy": per_class_acc,
         "macro_f1": macro_f1
     }
+
+def evaluate_classical(model, dataloader):
+    X = []
+    y = []
+
+    for images, labels in dataloader:
+        arr = images.numpy().reshape(images.shape[0], -1)
+        X.append(arr)
+        y.append(labels.numpy())
+
+    X = np.concatenate(X, axis=0)
+    y = np.concatenate(y, axis=0)
+
+    X_scaled = model.scaler.transform(X)
+    X_pca = model.pca.transform(X_scaled)
+
+    preds = model.svm.predict(X_pca)
+
+    acc = accuracy_score(y, preds)
+
+    decision = model.svm.decision_function(X_pca)
+    top5 = np.argsort(decision, axis=1)[:, -5:]
+    top5_correct = sum(1 for i in range(len(y)) if y[i] in top5[i])
+    top5_acc = top5_correct / len(y)
+
+    conf = sklearn_confusion_matrix(y, preds).tolist()
+
+    conf_np = np.array(conf, dtype=np.int64)
+    per_class_acc = (conf_np.diagonal() / np.maximum(conf_np.sum(axis=1), 1)).tolist()
+
+    eps = 1e-9
+    f1_scores = []
+    for i in range(100):
+        tp = conf_np[i, i]
+        fn = conf_np[i, :].sum() - tp
+        fp = conf_np[:, i].sum() - tp
+
+        precision = tp / (tp + fp + eps)
+        recall    = tp / (tp + fn + eps)
+        f1        = 2 * precision * recall / (precision + recall + eps)
+        f1_scores.append(f1)
+
+    macro_f1 = float(np.mean(f1_scores))
+
+    return {
+        "test_acc": float(acc),
+        "test_top5_acc": float(top5_acc),
+        "test_conf_matrix": conf,
+        "per_class_accuracy": per_class_acc,
+        "macro_f1": macro_f1
+    }
+
+def save_and_print_results(results, model_name, i, seed):
+    save_path = f"results/{model_name}_{i}_SEED_{seed}_EVAL_RESULTS.json"
+    with open(save_path, "w") as f:
+        json.dump(results, f, indent=4)
+    return save_path
 
 MODEL_MAP = {
     "ModelA": BaselineCNN,
@@ -159,80 +195,45 @@ if __name__ == "__main__":
 
     model_class = MODEL_MAP[args.model]
 
+    print(f"[INFO] Starting evaliation of model {args.model}")
+
     if args.model == "ModelCL":
-        prefix = f"checkpoints/PCASVMClassifier_{args.model}"
-        model = PCASVMClassifier.load(prefix)
-        ckpt_path = prefix
-        print(f"[INFO] Loaded classical PCA+SVM model: {prefix}")
+        for i, (model_path) in enumerate(get_classic_checkpoints(args.model)):
+            prefix = f"checkpoints/{model_path}"
+
+            seed = get_history_seed(f"{prefix}_history.json")
+            _, _, test_loader = get_cifar100(seed=seed, augment=False)
+
+            model = PCASVMClassifier.load(prefix)
+            ckpt_path = prefix
+            print(f"[INFO] Loaded classical PCA+SVM model: {prefix}")
+
+            results = evaluate_classical(model, test_loader)
+            save_path = save_and_print_results(results, args.model, i, seed)
+
+            print(f"[INFO] Saved evaluation results to {save_path}")
+
+            print("\n==== Evaluation Summary ====")
+            print(f"Top-1 Accuracy:     {results['test_acc']:.4f}")
+            print(f"Top-5 Accuracy:     {results['test_top5_acc']:.4f}")
+            print(f"Macro F1 Score:     {results['macro_f1']:.4f}")
 
     else:
-        model, ckpt_path = load_best_model(model_class, args.model, device=device)
-        print(f"[INFO] Loaded CNN checkpoint: {ckpt_path}")
+        for i, (model_path, history_path) in enumerate(get_all_checkpoints(args.model)):
+            seed = get_history_seed(history_path)
+            _, _, test_loader = get_cifar100(seed=seed, augment=False)
 
-    _, _, test_loader = get_cifar100(seed=42, augment=False)
+            model = load_model(model_class, model_path, device=device)
+            print(f"[INFO] Loaded CNN checkpoint: {model_path}")
 
-    loss_fn = nn.CrossEntropyLoss()
-    results = evaluate_model(model, test_loader, loss_fn, device=device)
+            loss_fn = nn.CrossEntropyLoss()
+            results = evaluate_model(model, test_loader, loss_fn, device=device)
+            save_path = save_and_print_results(results, args.model, i, seed)
 
-    save_path = f"checkpoints/{args.model}_EVAL_RESULTS.json"
-    with open(save_path, "w") as f:
-        json.dump(results, f, indent=4)
+            print(f"[INFO] Saved evaluation results to {save_path}")
 
-    print(f"[INFO] Saved evaluation results to {save_path}")
-
-    print("\n==== Evaluation Summary ====")
-    print(f"Top-1 Accuracy:  {results['test_acc']:.4f}")
-    print(f"Top-5 Accuracy:  {results['test_top5_acc']:.4f}")
-    print(f"Macro F1 Score:  {results['macro_f1']:.4f}")
-    print(f"Test Loss:       {results['test_loss']:.4f}")
-
-def evaluate_classical(model, dataloader):
-    X = []
-    y = []
-
-    for images, labels in dataloader:
-        arr = images.numpy().reshape(images.shape[0], -1)
-        X.append(arr)
-        y.append(labels.numpy())
-
-    X = np.concatenate(X, axis=0)
-    y = np.concatenate(y, axis=0)
-
-    X_scaled = model.scaler.transform(X)
-    X_pca = model.pca.transform(X_scaled)
-
-    preds = model.svm.predict(X_pca)
-
-    acc = accuracy_score(y, preds)
-
-    decision = model.svm.decision_function(X_pca)   # shape: (N, 100)
-    top5 = np.argsort(decision, axis=1)[:, -5:]
-    top5_correct = sum(1 for i in range(len(y)) if y[i] in top5[i])
-    top5_acc = top5_correct / len(y)
-
-    conf = confusion_matrix(y, preds).tolist()
-
-    conf_np = np.array(conf, dtype=np.int64)
-    per_class_acc = (conf_np.diagonal() / np.maximum(conf_np.sum(axis=1), 1)).tolist()
-
-    eps = 1e-9
-    f1_scores = []
-    for i in range(100):
-        tp = conf_np[i, i]
-        fn = conf_np[i, :].sum() - tp
-        fp = conf_np[:, i].sum() - tp
-
-        precision = tp / (tp + fp + eps)
-        recall    = tp / (tp + fn + eps)
-        f1        = 2 * precision * recall / (precision + recall + eps)
-        f1_scores.append(f1)
-
-    macro_f1 = float(np.mean(f1_scores))
-
-    return {
-        "test_acc": float(acc),
-        "test_top5_acc": float(top5_acc),
-        "test_conf_matrix": conf,
-        "per_class_accuracy": per_class_acc,
-        "macro_f1": macro_f1
-    }
+            print("\n==== Evaluation Summary ====")
+            print(f"Top-1 Accuracy:  {results['test_acc']:.4f}")
+            print(f"Top-5 Accuracy:  {results['test_top5_acc']:.4f}")
+            print(f"Macro F1 Score:  {results['macro_f1']:.4f}")
+            print(f"Test Loss:       {results['test_loss']:.4f}")

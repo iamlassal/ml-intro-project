@@ -4,8 +4,10 @@ import os
 import json
 import glob
 import numpy as np
+import settings
 from datetime import datetime
 from time import time
+import copy
 
 def set_seed(seed=42):
     if seed is None:
@@ -123,9 +125,10 @@ def train(
 
         if val_acc > best_val_acc:
             best_val_acc = val_acc
-            best_state = model.state_dict()
+            best_state = copy.deepcopy(model.state_dict())
 
     history["total_time"] = time() - t_start
+    history["seed"] = settings.SEED
 
     return best_state, history
 
@@ -148,8 +151,7 @@ def train_classical(exp, train_loader, val_loader):
         os.makedirs("checkpoints", exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
 
-        model_name = model.__class__.__name__
-        prefix = f"checkpoints/{model_name}_{name}_{timestamp}"
+        prefix = f"checkpoints/{name}_{timestamp}"
 
         saved_paths = model.save(prefix)
 
@@ -196,6 +198,44 @@ def load_model(model_class, path, device="cpu"):
     model.eval()
     print(f"[INFO] Loaded model from {path}")
     return model
+
+def get_all_checkpoints(model_name):
+    pairs = []
+    for f in os.listdir("checkpoints"):
+        if f.startswith(model_name) and f.endswith(".pth"):
+            base = f[:-4]  # strip ".pth"
+            checkpoint = os.path.join("checkpoints", f)
+            history = os.path.join("checkpoints", base + "_history.json")
+            pairs.append((checkpoint, history))
+
+    print([p[0] for p in pairs])
+    print([p[1] for p in pairs])
+    return pairs
+
+def get_classic_checkpoints(model_name):
+    folder = "checkpoints"
+    prefixes = set()
+
+    for filename in os.listdir(folder):
+        if not filename.startswith(model_name + "_"):
+            continue
+
+        if filename.endswith("_history.json"):
+            stem = filename[:-len("_history.json")]
+        elif filename.endswith("_pca.joblib"):
+            stem = filename[:-len("_pca.joblib")]
+        elif filename.endswith("_scaler.joblib"):
+            stem = filename[:-len("_scaler.joblib")]
+        elif filename.endswith("_svm.joblib"):
+            stem = filename[:-len("_svm.joblib")]
+        else:
+            continue
+
+        parts = stem.split("_")
+        prefix = parts[0] + "_" + parts[1]
+        prefixes.add(prefix)
+
+    return prefixes
 
 def find_latest_checkpoint(model_name: str):
     pattern = os.path.join("checkpoints", f"{model_name}_*.pth")
@@ -250,51 +290,10 @@ def confusion_matrix(model, dataloader, num_classes=100, device="cpu"):
 
     return matrix
 
-def load_best_model(model_class, model_name, device="cpu"):
-    ckpt = find_latest_checkpoint(model_name)
-    if ckpt is None:
-        raise ValueError(f"No checkpoint found for {model_name}")
-    model = model_class().to(device)
-    model.load_state_dict(torch.load(ckpt, map_location=device))
-    model.eval()
-    return model, ckpt
-
-def test(model, dataloader, loss_fn, device="cpu"):
-    model.eval()
-    total_loss = 0.0
-    total_correct = 0
-    total_samples = 0
-
-    all_preds = []
-    all_labels = []
-
-    with torch.no_grad():
-        for images, labels in dataloader:
-            images = images.to(device)
-            labels = labels.to(device)
-
-            logits = model(images)
-            loss = loss_fn(logits, labels)
-
-            total_loss += loss.item() * labels.size(0)
-            preds = logits.argmax(dim=1)
-
-            total_correct += (preds == labels).sum().item()
-            total_samples += labels.size(0)
-
-            all_preds.append(preds.cpu().numpy())
-            all_labels.append(labels.cpu().numpy())
-
-    avg_loss = total_loss / total_samples
-    avg_acc = total_correct / total_samples
-
-    all_preds = np.concatenate(all_preds)
-    all_labels = np.concatenate(all_labels)
-
-    test_conf = confusion_matrix(model, dataloader, num_classes=100, device=device)
-
-    return {
-        "test_loss": float(avg_loss),
-        "test_acc": float(avg_acc),
-        "test_conf_matrix": test_conf.tolist()
-    }
+def get_history_seed(path):
+    with open(path) as f:
+        history = json.load(f)
+    if "seed" in history:
+        return history["seed"]
+    else:
+        print(f"[ERROR]: \"seed\" key not found in {path}! Aborting!")

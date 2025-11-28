@@ -2,6 +2,6 @@ __pycache__
 .venv
 checkpoints/*
 data/*
-
+results/*
 # readme contains sensitive information atm
 README.md

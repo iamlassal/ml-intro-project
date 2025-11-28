@@ -2,6 +2,7 @@ import numpy as np
 import os
 import joblib
 import time
+import settings
 
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
@@ -59,6 +60,7 @@ class PCASVMClassifier:
             val_conf = confusion_matrix(y_val, val_preds)
 
         history = {
+            "seed": settings.SEED,
             "train_acc": [float(train_acc)],
             "train_conf_matrix": train_conf.tolist(),
             "val_acc": [float(val_acc)] if val_acc is not None else [],
