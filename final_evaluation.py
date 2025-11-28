@@ -13,7 +13,7 @@ from utils import (
 )
 from sklearn.metrics import accuracy_score
 from sklearn.metrics import confusion_matrix as sklearn_confusion_matrix
-from datasets import get_cifar100
+from datasets import get_cifar100, get_cifar100_transfer
 from models.baseline import BaselineCNN
 from models.batchdrop import BatchDropCNN
 from models.batchnorm import BatchnormCNN
@@ -244,7 +244,11 @@ if __name__ == "__main__":
     else:
         for i, (model_path, history_path) in enumerate(get_all_checkpoints(args.model)):
             seed = get_history_seed(history_path)
-            _, _, test_loader = get_cifar100(seed=seed, augment=False)
+
+            if args.model == "ModelT":
+                _, _, test_loader = get_cifar100_transfer(seed=seed, augment=False)
+            else:
+                _, _, test_loader = get_cifar100(seed=seed, augment=False)
 
             model = load_model(model_class, model_path, device=device)
             print(f"[INFO] Loaded CNN checkpoint: {model_path}")
