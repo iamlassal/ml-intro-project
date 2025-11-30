@@ -1,6 +1,7 @@
 import json
 import argparse
 import os
+import re
 import matplotlib.pyplot as plt
 
 def load_history(path):
@@ -9,19 +10,60 @@ def load_history(path):
         history = json.load(f)
     return history
 
-def plot_histories(histories, labels=None, title="Training Curves", test_set=False, filename=""):
-    if labels is None:
-        labels = [f"Run {i+1}" for i in range(len(histories))]
+def load_results(model_name):
+    files = list_result_files()
+    results = []
+    for filename in files:
+        if model_name in filename.split("_"):
+            path = os.path.join("results", filename)
+            m = re.search(r"SEED_(\d+)", filename)
+            seed = m.group(1) # pyright: ignore
+            print(seed)
+            with open(path, "r") as f:
+                result = json.load(f)
+                results.append((seed, result))
+    return results
 
+def cm_heatmap(model_name, filename=""):
+    fig, ax = plt.subplots(2,2, figsize=(12, 8))
+    ax = ax.flatten()
+    results = load_results(model_name)
+
+    for i, (seed, data) in enumerate(results):
+        heatmap = data["test_conf_matrix"]
+        ax[i].imshow(heatmap)
+        ax[i].set_title(f"Seed: {seed}")
+
+    avg = [[0.0 for j in range(100)] for i in range(100)]
+
+    for _, data in results:
+        for i in range(100):
+            for j in range(100):
+                avg[i][j] += data["test_conf_matrix"][i][j]
+
+    for i in range(100):
+        for j in range(100):
+            avg[i][j] /= 3
+
+    ax[3].imshow(avg)
+    ax[3].set_title("Average")
+    plt.tight_layout()
+    plt.suptitle(model_name)
+    if filename != "":
+        plt.savefig(f"{filename}.pdf")
+    else:
+        plt.show()
+
+def plot_histories(histories, title="Training Curves", test_set=False, filename=""):
     epochs = range(1, len(histories[0]["train_loss"]) + 1)
 
     plt.figure(figsize=(14, 6))
 
     plt.subplot(1, 2, 1)
-    for hist, label in zip(histories, labels):
+    for i, hist in enumerate(histories):
         if test_set:
-            plt.plot(epochs, hist["train_loss"], linestyle="--", alpha=0.6)
-        plt.plot(epochs, hist["val_loss"], label=f"{label}", alpha=0.9)
+            plt.plot(epochs, hist["train_loss"], linestyle="--", alpha=0.6, color=f"C{i}")
+        plt.plot(epochs, hist["val_loss"], label=f"Seed {hist["seed"]}", alpha=0.9,color=f"C{i}")
 
     plt.xlabel("Epoch")
     plt.ylabel("Loss")
@@ -29,11 +71,12 @@ def plot_histories(histories, labels=None, title="Training Curves", test_set=Fal
     plt.legend()
     plt.grid(True)
 
+
     plt.subplot(1, 2, 2)
-    for hist, label in zip(histories, labels):
+    for i, hist in enumerate(histories):
         if test_set:
-            plt.plot(epochs, hist["train_acc"], linestyle="--", alpha=0.6)
-        plt.plot(epochs, hist["val_acc"], label=f"{label}", alpha=0.9)
+            plt.plot(epochs, hist["train_acc"], linestyle="--", alpha=0.6, color=f"C{i}")
+        plt.plot(epochs, hist["val_acc"], label=f"Seed {hist["seed"]}", alpha=0.9, color=f"C{i}")
 
     plt.xlabel("Epoch")
     plt.ylabel("Accuracy")
@@ -49,13 +92,19 @@ def plot_histories(histories, labels=None, title="Training Curves", test_set=Fal
         plt.show()
 
 def plot_single_history(history, title="Training Curve", filename=""):
-    plot_histories([history], labels=["Run"], title=title, filename=filename)
+    plot_histories([history], title=title, filename=filename if args.save else "")
 
 def list_history_files():
     checkpoint_dir = "checkpoints"
     return [
         f for f in os.listdir(checkpoint_dir)
         if f.endswith("_history.json")
+    ]
+
+def list_result_files():
+    return [
+        f for f in os.listdir("results")
+        if f.endswith("_EVAL_RESULTS.json")
     ]
 
 def extract_model_prefix(filename):
@@ -100,6 +149,7 @@ if __name__ == "__main__":
     parser.add_argument("--compare-all", type=str, help="Compare ALL runs for a given model name (e.g., BaselineCNN_ModelA)")
     parser.add_argument("--test-set", action="store_true", help="Include test history when comparing all runs for a given model name.")
     parser.add_argument("--save", type=str, help="Save plot to a PDF.")
+    parser.add_argument("--cm", type=str, help="Show the confusion matrices of an evaluated model.")
     args = parser.parse_args()
 
     if args.list:
@@ -144,7 +194,7 @@ if __name__ == "__main__":
         histories = [load_history(p) for p in selected_paths]
         labels = [os.path.basename(p).replace("_history.json", "") for p in selected_paths]
 
-        plot_multiple_histories(histories, labels)
+        plot_multiple_histories(histories, labels=None, filename=args.save if args.save else "")
         exit(0)
 
     if args.latest is not None:
@@ -207,5 +257,8 @@ if __name__ == "__main__":
         histories = [load_history(m.replace("_history.json", "")) for m in matching]
         labels = [f"Run {i+1}" for i in range(len(histories))]
 
-        plot_histories(histories, labels, title=f"All runs for {model_prefix}", test_set=args.test_set, filename=args.save if args.save else "")
+        plot_histories(histories, title=f"All runs for {model_prefix}", test_set=args.test_set, filename=args.save if args.save else "")
         exit(0)
+
+    if args.cm:
+        cm_heatmap(args.cm, filename=args.save if args.save else "")
