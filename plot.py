@@ -21,14 +21,14 @@ def load_results(model_name):
             print(seed)
             with open(path, "r") as f:
                 result = json.load(f)
-                results.append((seed, result))
+                results.append((int(seed), result))
     return results
 
 def cm_heatmap(model_name, filename=""):
     fig, ax = plt.subplots(2,2, figsize=(12, 8))
     ax = ax.flatten()
     results = load_results(model_name)
-
+    results.sort()
     for i, (seed, data) in enumerate(results):
         heatmap = data["test_conf_matrix"]
         ax[i].imshow(heatmap)
