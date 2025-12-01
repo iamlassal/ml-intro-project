@@ -1,3 +1,5 @@
+# WARNING: THIS DOCUMENTATION IS OUT OF DATE
+
 # Plot Usage
 
 This script allows you to visualize training curves (loss/accuracy) from saved

@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 
+from models.deepwide import DeepWideCNN
 from utils import (
     load_model,
     confusion_matrix as util_confusion_matrix,
@@ -197,6 +198,8 @@ MODEL_MAP = {
     "ModelG": DeepBatchDropCNN,
     "ModelH": WideBatchDropCNN,
     "ModelT": ResNet18TransferCNN,
+    "ModelMML": BaselineCNN,
+    "ModelX": DeepWideCNN,
     "ModelCL": PCASVMClassifier,
 }
 
